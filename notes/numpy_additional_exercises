@@ -1,29 +1,33 @@
-Consider a large matrix of which a lot of entries are zero. To
-preserve memory, such an array is stored as [r,c,v] where r is row
-index, c is column index, v is value.
+- Consider a large matrix of which a lot of entries are zero. To
+  preserve memory, such an array is stored as [r,c,v] where r is row
+  index, c is column index, v is value.
+  
+  1. Create efficient routines for converting between this and normal
+  numpy format.
+  
+  2. Clearly such representation will also be helpful for matrix
+  multiplication, as the zeros simply are not there. Create routines for
+  a) Matrix addition
+  b) Matrix multiplication with another matrix or a vector
+  
+  For your purposes, generate an array with random data which is only 1%
+  full.
+  
+  After that use the moviedata.mat which is a matlab file present in the
+  directory. Search on the internet on how to open that.
+  
 
-1. Create efficient routines for converting between this and normal
-numpy format.
 
-2. Clearly such representation will also be helpful for matrix
-multiplication, as the zeros simply are not there. Create routines for
-a) Matrix addition
-b) Matrix multiplication with another matrix or a vector
-
-For your purposes, generate an array with random data which is only 1%
-full.
-
-
-Consider some text data, say a long file. Write a function which
-"preprocesses" the file, that is:
-1. It removes punctuation from the file.
-2. Converts all words to lowercase.
-3. Indexes all words with an integer.
-
-After that do an analysis of the text to find out.
-1. Top 100 most common words.
-2. 1% least common words.
-3. Plot a histogram of all the words.
-
-You should use a dictionary object for words and numpy arrays for the
-analysis.
+- Consider some text data, say a long file. Write a function which
+  "preprocesses" the file, that is:
+  1. It removes punctuation from the file.
+  2. Converts all words to lowercase.
+  3. Indexes all words with an integer.
+  
+  After that do an analysis of the text to find out.
+  1. Top 100 most common words.
+  2. 1% least common words.
+  3. Plot a histogram of all the words.
+  
+  You should use a dictionary object for words and numpy arrays for the
+  analysis.
