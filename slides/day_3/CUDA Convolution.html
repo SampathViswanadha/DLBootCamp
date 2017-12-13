@@ -1,0 +1,577 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!-- saved from url=(0047)https://www.evl.uic.edu/sjames/cs525/final.html -->
+<html lang="ko"><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+<meta name="generator" content="Adobe GoLive">
+<link href="./CUDA Convolution_files/james.css" rel="stylesheet" type="text/css">
+<title>CUDA Convolution</title>
+</head>
+<body bgcolor="white" text="black" link="#ff9900">
+<table width="1024" border="0" align="center" cellpadding="0" cellspacing="0">
+  <tbody><tr>
+    <td width="300"><img src="./CUDA Convolution_files/project_cuda.jpg" alt="" width="300" height="300"></td>
+    <td width="33"></td>
+    <td width="768"><h1>CUDA Convolution</h1>
+      <h2 class="center">- GPGPU Programming -</h2>
+      <h2 class="center">Dec, 2008</h2>
+      <h5 class="center">Sangyoon Lee (sjames @ evl.uic.edu)</h5>
+      <h5 class="center">Electronic Visualization Laboratory</h5>
+      <h5 class="center">University of Illinois at Chicago</h5>
+      <br>
+    </td>
+  </tr>
+</tbody></table>
+<hr width="100%">
+<br>
+<h5 class="center">* This project is a part of <a href="http://www.evl.uic.edu/aej/525/">CS525 GPU Programming Class</a> instructed by <a href="http://www.evl.uic.edu/aej">Andy Johnson</a>. </h5>
+<h3><br>
+  1. Concept and Brief </h3>
+<blockquote>
+  <p>A given final exam is to explore CUDA optimization with Convoluiton filter application from nvidia's CUDA 2.0 SDK. There are three type of convolution filter in SDK. I mainly used convolutionTexture and convolutionSeparable application.</p>
+  <h5>- Dataset (Images)</h5>
+  <p>Images used in final is provided by Andy (<a href="http://www.evl.uic.edu/aej/525/final.html">see class website</a>). I used 1kby1k, 2kby2k and 4kby4k image for performance testing. For some reason, 8kby8k image does not work well on my system.</p>
+  <h5>- Development platform</h5>
+  <p>Mac OSX 10.5, MacBook Pro 2.5GHz, Geforce 8600M GT 512MB, nvidia CUDA SDK 2.0</p>
+  <p>Intermediate and Final version of application is available to download and test. See more details in section 7 below.</p>
+</blockquote>
+<blockquote>
+  <p><br>
+  </p>
+</blockquote>
+<h3>2. Starting</h3>
+<blockquote>
+  <p>Since there is well optimized application is available in SDK, I started to look at their code. First of all, original code uses random data instead of real images. Each data pixel in image represented as single float in these application. To make this application work with real image, I implemeted image loader and writer in RAW format. This code was slightly modified the module we used in project 2.</p>
+  <p>Each color component of pixel is composed of three values, RGB. To apply convolution filter on image, there are two ways. The first one is simply to map each component as single float and run convolution filter three times for each channel. The second apporach is to modify the original code to use uchar4 or int type as dataset so that we can compute separate channel value within CUDA kernel. I implemeted both ways in convolutionTexuture and convolutionSeparable but later on I only used the first method since it makes kernel code much simpler.</p>
+  <p>First thing I tried is top-down approach. I mean I took nvidia application and started to remove some of optimization techniques. Then, realized that it is not easy to make this all the way down to naive approach. So, restarted implementation from the most naive way and optimized it to close to the nvidia's application. Later section will explain these steps.</p>
+  <p>If you are not familiar with convolution filter, please take a look wikipedia entry, <a href="http://en.wikipedia.org/wiki/Gaussian_blur">Gaussian blur</a> or <a href="http://en.wikipedia.org/wiki/Convolution">Convolution</a>. Also, class lecture note (<a href="http://www.evl.uic.edu/aej/525/lecture04.html">week4, convolution</a>) is useful.</p>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>3. Step 0: the most Naive approach</h3>
+<blockquote>
+  <p>From the idea of convolutio filter itself, the most naive approach is to use global memory to send data to device and each thread accesses this to compute convolution kernel. Our convolution kernel size is radius 8 (total 17x17 multiplicaiton for single pixel value). In image border area, reference value will be set to 0 during computation. This naive approach includes many of conditional statements and this causes very slow execution.</p>
+  <p>There is no idle threads since total number of threads invoked is the same as total pixel numbers. CUDA kernel block size is 16x16. Below execution time is a mean value over 10 times execution. As you can see, it is extremely slow here.</p>
+  <table width="647" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Time (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1749.08</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">6773.38</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">282668.84</font></div></td>
+    </tr>
+  </tbody></table>
+  <p><img src="./CUDA Convolution_files/diagram_02.jpg" width="1002" height="586"></p>
+  <p align="left">Figure 1. Memory Access Pattern in Naive approach: each threads in block access 17x17 times global memory.</p>
+  <p>&nbsp;</p>
+  <p>Below is CUDA kernel code.</p>
+  <blockquote>
+    <p><code><font color="#CC6633">__global__ void convolutionGPU(<br>
+      <font color="#000000">...............................</font>float *d_Result,<br>
+      <font color="#000000">...............................</font>float *d_Data,<br>
+      <font color="#000000">...............................</font>int dataW,<br>
+      <font color="#000000">...............................</font>int dataH )<br>
+      {<br>
+      <font color="#000000">....</font>//////////////////////////////////////////////////////////////////////<br>
+      <font color="#000000">....</font>// most slowest way to compute convolution<br>
+      <font color="#000000">....</font>//////////////////////////////////////////////////////////////////////<br>
+      <br>
+      <font color="#000000">....</font>// global mem address for this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">.....................</font>blockIdx.x * blockDim.x +<br>
+      <font color="#000000">.....................</font>threadIdx.y * dataW +<br>
+      <font color="#000000">.....................</font>blockIdx.y * blockDim.y * dataW; <br>
+      <br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>float value = 0;<br>
+      <br>
+      <font color="#000000">....</font>for (int i = -KERNEL_RADIUS; i &lt;= KERNEL_RADIUS; i++)		// row wise<br>
+      <font color="#000000">........</font>for (int j = -KERNEL_RADIUS; j &lt;= KERNEL_RADIUS; j++)	// col wise<br>
+      <font color="#000000">........</font>{<br>
+      <font color="#000000">............</font>// check row first<br>
+      <font color="#000000">............</font>if (blockIdx.x == 0 &amp;&amp; (threadIdx.x + i) &lt; 0)					// left apron<br>
+      <font color="#000000">................</font>value = 0;<br>
+      <font color="#000000">............</font>else if ( blockIdx.x == (gridDim.x - 1) &amp;&amp; <br>
+      <font color="#000000">........................</font>(threadIdx.x + i) &gt; blockDim.x-1 )					// right apron<br>
+      <font color="#000000">................</font>value = 0;<br>
+      <font color="#000000">............</font>else <br>
+      <font color="#000000">............</font>{ <br>
+      <font color="#000000">................</font>// check col next<br>
+      <font color="#000000">................</font>if (blockIdx.y == 0 &amp;&amp; (threadIdx.y + j) &lt; 0)				// top apron<br>
+      <font color="#000000">....................</font>value = 0;<br>
+      <font color="#000000">................</font>else if ( blockIdx.y == (gridDim.y - 1) &amp;&amp; <br>
+      <font color="#000000">............................</font>(threadIdx.y + j) &gt; blockDim.y-1 )					// bottom apron<br>
+      <font color="#000000">....................</font>value = 0;<br>
+      <font color="#000000">................</font>else														// safe case<br>
+      <font color="#000000">....................</font>value = d_Data[gLoc + i + j * dataW];<br>
+      <font color="#000000">............</font>} <br>
+      <font color="#000000">............</font>sum += value * d_Kernel[KERNEL_RADIUS + i] * d_Kernel[KERNEL_RADIUS + j];<br>
+      <font color="#000000">........</font>}</font></code><br>
+      <font color="#CC6633"><code><font color="#000000">........</font>d_Result[gLoc] = sum; <br>
+      }</code></font></p>
+  </blockquote>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>4. Step 1: Shared Memory</h3>
+<blockquote>
+  <p>We all experienced the importance of shared memory throughout project 2. Now, it is time to incorporate with this feature from naive code. When I read nvidia convolution document, I thought that it is OK to invoke many of threads and each thread load data from global mem to shared mem. Then, let some of threads idle. Those are thread loaded apron pixels and do not compute convolution.</p>
+  <p>The first attempt was to keep active thread size as same as previous and increase block size for apron pixels. This did not work since convolution kernel radius is 8 and it make block size to 32 x 32 (1024). This is bigger than G80 hardware limit (512 threads max per block).</p>
+  <p>Therefore, I changes scheme as all threads are active and each thread loads four pixels and keep the block size 16x16.  Shared Memory size used is 32x32 (this includes all necessary apron pixel values for 16x16 active pixels). Below shows quite a bit of performance improve. This is almost <font color="#FF0000">x2.8 speed up</font> over naive approach (in 2048 resolution).</p>
+  <table width="647" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Time (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">672.02</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2421.99</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">9457.56</font></div></td>
+    </tr>
+  </tbody></table>
+  <p><img src="./CUDA Convolution_files/diagram_03.jpg" width="1052" height="626"></p>
+  <p>Figure 2. Shared Memory Model for naive approach: each threads in block load 4 values from global memory. Threfore, <font color="#FF0000">total shared memory size is 4 times bigger</font> than active convolution pixels to include apron area (kernel radius 8 and block size 16x16. <font color="#FF0000">active pixels 256 float vs. shared memory size is 1024 float</font>).</p>
+  <p>&nbsp;</p>
+  <p>Below codes illustrate the convolution kernel.</p>
+  <blockquote>
+    <p><code><br>
+      <font color="#CC6633">__global__ void convolutionGPU(<br>
+      <font color="#000000">................................</font>float *d_Result,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Data,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataW,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataH<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>)<br>
+      {<br>
+      <font color="#000000">....</font>// Data cache: threadIdx.x , threadIdx.y<br>
+      <font color="#000000">....</font>__shared__ float data[TILE_W + KERNEL_RADIUS * 2][TILE_W + KERNEL_RADIUS * 2]; <br>
+      <br>
+      <font color="#000000">....</font>// global mem address of this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.x, blockDim.x) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(threadIdx.y, dataW) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.y, blockDim.y) * dataW; <br>
+      <font color="#000000"><br>
+      ....</font>// load cache (32x32 shared memory, 16x16 threads blocks)<br>
+      <font color="#000000">....</font>// each threads loads four values from global memory into shared mem<br>
+      <font color="#000000">....</font>// if in image area, get value in global mem, else 0<br>
+      <font color="#000000">....</font>int x, y;		// image based coordinate</font></code><br>
+      <font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// original image based coordinate<br>
+      <font color="#000000">....</font>const int x0 = threadIdx.x + IMUL(blockIdx.x, blockDim.x);<br>
+      <font color="#000000">....</font>const int y0 = threadIdx.y + IMUL(blockIdx.y, blockDim.y); <br>
+      <font color="#000000"><br>
+      ....</font>// case1: upper left<br>
+      <font color="#000000">....</font>x = x0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>y = y0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &lt; 0 || y &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = d_Data[ gLoc - KERNEL_RADIUS - IMUL(dataW, KERNEL_RADIUS)];<br>
+      </code></font><font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// case2: upper right<br>
+      <font color="#000000">....</font>x = x0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>y = y0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &gt; dataW-1 || y &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y] = d_Data[gLoc + KERNEL_RADIUS - IMUL(dataW, KERNEL_RADIUS)];<br>
+      </code></font><font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// case3: lower left<br>
+      <font color="#000000">....</font>x = x0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>y = y0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if (x &lt; 0 || y &gt; dataH-1)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y + blockDim.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y + blockDim.y] = d_Data[gLoc - KERNEL_RADIUS + IMUL(dataW, KERNEL_RADIUS)];</code></font><br>
+      <font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// case4: lower right<br>
+      <font color="#000000">....</font>x = x0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>y = y0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &gt; dataW-1 || y &gt; dataH-1)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y + blockDim.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y + blockDim.y] = d_Data[gLoc + KERNEL_RADIUS + IMUL(dataW, KERNEL_RADIUS)]; <br>
+      <font color="#000000"><br>
+      ....</font>__syncthreads();</code></font><br>
+      <font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// convolution<br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>x = KERNEL_RADIUS + threadIdx.x;<br>
+      <font color="#000000">....</font>y = KERNEL_RADIUS + threadIdx.y;<br>
+      <font color="#000000">....</font>for (int i = -KERNEL_RADIUS; i &lt;= KERNEL_RADIUS; i++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>for (int j = -KERNEL_RADIUS; j &lt;= KERNEL_RADIUS; j++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>sum += data[x + i][y + j] * d_Kernel[KERNEL_RADIUS + j] * d_Kernel[KERNEL_RADIUS + i];</code></font><br>
+      <font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>d_Result[gLoc] = sum; <br>
+      }</code></font></p>
+  </blockquote>
+  <p>&nbsp;</p>
+  <p>One more optimization tested here. The use of faster integer multiplication instruction (above code already has this change), __mul24. After replacing all integer multiplication with __mul24, I got slight better performance.</p>
+  <table width="647" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Time (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">657.59</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2325.86</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">9301.09</font></div></td>
+    </tr>
+  </tbody></table>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>5. Step 2: Filter Separation</h3>
+<blockquote>
+  <p>Here very important aspect of convolution filter is that it can be separated by row and column. This will reduce computation complexity from m*m to m+m. Basically we apply two separate convolution. The first one is row-wise and the second one is column-wise from the first result data (apply column convolution over row-wise filtered data). This also reduces some of conditional statement and total number of apron pixel data in each path since we do not need to consider vertical apron in row-convolution kernel and horizontal apron in column-convolution kernel.</p>
+  <p>This gives me a great improvement over the last shared memory optimized version. This is almost <font color="#FF0000">x6.2 speed-up</font> from the last version (in resolution 2048). Code already includes __mul24 instruction.</p>
+  <table width="647" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Time (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">116.37</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">373.64</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1492.99</font></div></td>
+    </tr>
+  </tbody></table>
+  <p><img src="./CUDA Convolution_files/diagram_04.jpg" width="1072" height="598"></p>
+  <p>Figure 3. Shared Memory for separate filter: this time only twice bigger memory is necessary for each filter</p>
+  <p>&nbsp;</p>
+  <p>Unfortunately compiler directive for loopunroll (#pragma unroll 17) does not give any significat improvement. Below shows kernel code for separable convolution filter. Applicatin also modified to run twice of the kernel for row and col convolution.</p>
+  <blockquote>
+    <p><code><font color="#CC6633">////////////////////////////////////////////////////////////////////////////////<br>
+      // Row convolution filter<br>
+      ////////////////////////////////////////////////////////////////////////////////<br>
+      __global__ void convolutionRowGPU(<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Result,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Data,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataW,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataH<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">..</font>)<br>
+      {<br>
+      <font color="#000000">....</font>// Data cache: threadIdx.x , threadIdx.y<br>
+      <font color="#000000">....</font>__shared__ float data[TILE_W + KERNEL_RADIUS * 2][TILE_H]; <br>
+      <font color="#000000"><br>
+      ....</font>// global mem address of this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.x, blockDim.x) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(threadIdx.y, dataW) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.y, blockDim.y) * dataW; <br>
+      <br>
+      <font color="#000000">....</font>int x;		// image based coordinate</font></code><br>
+      <font color="#CC6633"><code><font color="#000000"><br>
+      ....</font>// original image based coordinate<br>
+      <font color="#000000">....</font>const int x0 = threadIdx.x + IMUL(blockIdx.x, blockDim.x); <br>
+      <br>
+      <font color="#000000">....</font> // case1: left<br>
+      <font color="#000000">....</font>x = x0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = d_Data[ gLoc - KERNEL_RADIUS];<br>
+      </code></font><font color="#CC6633"><code><br>
+      <font color="#000000">....</font> // case2: right<br>
+      <font color="#000000">....</font>x = x0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &gt; dataW-1 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x][threadIdx.y] = d_Data[gLoc + KERNEL_RADIUS]; <br>
+      <br>
+      <font color="#000000">....</font> __syncthreads();<br>
+      </code></font><font color="#CC6633"><code><br>
+      <font color="#000000">....</font>// convolution<br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>x = KERNEL_RADIUS + threadIdx.x;<br>
+      <font color="#000000">....</font><br>
+      <font color="#000000">....</font>for (int i = -KERNEL_RADIUS; i &lt;= KERNEL_RADIUS; i++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>sum += data[x + i][threadIdx.y] * d_Kernel[KERNEL_RADIUS + i];</code></font><br>
+      <font color="#CC6633"><code><br>
+      <font color="#000000">....</font> d_Result[gLoc] = sum;</code></font><br>
+      <font color="#CC6633"><code>}<br>
+      </code></font><font color="#CC6633"><code><br>
+      ////////////////////////////////////////////////////////////////////////////////<br>
+      // Column convolution filter<br>
+      ////////////////////////////////////////////////////////////////////////////////<br>
+      __global__ void convolutionColGPU(<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Result,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Data,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataW,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataH<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">.</font>)<br>
+      {<br>
+      <font color="#000000">....</font>// Data cache: threadIdx.x , threadIdx.y<br>
+      <font color="#000000">....</font>__shared__ float data[TILE_W][TILE_H + KERNEL_RADIUS * 2]; <br>
+      <br>
+      <font color="#000000">....</font> // global mem address of this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.x, blockDim.x) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(threadIdx.y, dataW) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.y, blockDim.y) * dataW; <br>
+      <br>
+      <font color="#000000">....</font>int y;		// image based coordinate</code></font><br>
+      <font color="#CC6633"><code><br>
+      <font color="#000000">....</font>// original image based coordinate<br>
+      <font color="#000000">....</font>const int y0 = threadIdx.y + IMUL(blockIdx.y, blockDim.y); <br>
+      <br>
+      <font color="#000000">....</font>// case1: upper<br>
+      <font color="#000000">....</font>y = y0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( y &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y] = d_Data[ gLoc - IMUL(dataW, KERNEL_RADIUS)];<br>
+      </code></font><font color="#CC6633"><code><br>
+      <font color="#000000">....</font>// case2: lower<br>
+      <font color="#000000">....</font>y = y0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( y &gt; dataH-1 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y + blockDim.y] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x][threadIdx.y + blockDim.y] = d_Data[gLoc + IMUL(dataW, KERNEL_RADIUS)];<br>
+      <br>
+      <font color="#000000">....</font>__syncthreads();</code></font><br>
+      <font color="#CC6633"><code><br>
+      <font color="#000000">....</font>// convolution<br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>y = KERNEL_RADIUS + threadIdx.y;<br>
+      <font color="#000000">....</font>for (int i = -KERNEL_RADIUS; i &lt;= KERNEL_RADIUS; i++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>sum += data[threadIdx.x][y + i] * d_Kernel[KERNEL_RADIUS + i];</code></font><br>
+      <font color="#CC6633"><code><br>
+      <font color="#000000">....</font>d_Result[gLoc] = sum;</code></font><br>
+      <font color="#CC6633"><code>}</code></font></p>
+  </blockquote>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>6. Step 3: Reorganize Shared Memory</h3>
+<blockquote>
+  <p>Until step 2, I used 2D array of shared memory to make indexing a bit simpler. Inside computation loop, there is possibility of bank conflict for warp since each thread access first column major memory at the same time. Now, let's re-arrange this shared memory to 1D array so that all threads access data consequently and optimize memory bus here. This only requires changes of indexing in kernel code. Below table shows performance after this re-arrange.</p>
+  <table width="647" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="160" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Time (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">28.99</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">118.35</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">369.90</font></div></td>
+    </tr>
+  </tbody></table>
+  <p><img src="./CUDA Convolution_files/diagram_05.jpg" width="918" height="440"></p>
+  <p>Figure 4. 1D Shared Memory Access Pattern for row filter: shows the first four iteration of convolution computataion. red area is indicating values accessed by half warp threads. Even we obtained fair amount speed up with this re-arrangement, memory access pattern is not aligned well enough to meet the requirement of half-warp alignment for optimal performance.</p>
+  <p>&nbsp;</p>
+  <p>As you can see above table data, it achived about <font color="#FF0000">x3.2 speed-up</font> over the first separable convoluiton implementation (in resolution 2048). Following shows kernel code for this optimization. From step 0 to this point, we made <font color="#FF0000">x57 speed-up overall</font> (in resolution 2048).</p>
+  <blockquote>
+    <p><code><font color="#CC6633">////////////////////////////////////////////////////////////////////////////////<br>
+      // Row convolution filter<br>
+      ////////////////////////////////////////////////////////////////////////////////<br>
+      __global__ void convolutionRowGPU(<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Result,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Data,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataW,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataH<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">.....</font>)<br>
+      {<br>
+      <font color="#000000">....</font>// Data cache: threadIdx.x , threadIdx.y<br>
+      <font color="#000000">....</font>__shared__ float data[ TILE_H * (TILE_W + KERNEL_RADIUS * 2) ];<br>
+      <br>
+      <font color="#000000">....</font>// global mem address of this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.x, blockDim.x) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(threadIdx.y, dataW) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.y, blockDim.y) * dataW;<br>
+      <br>
+      <br>
+      <font color="#000000">....</font>int x;		// image based coordinate<br>
+      <br>
+      </font></code><font color="#CC6633"><code><font color="#000000">....</font>// original image based coordinate<br>
+      <font color="#000000">....</font>const int x0 = threadIdx.x + IMUL(blockIdx.x, blockDim.x);<br>
+      <font color="#000000">....</font>const int shift = threadIdx.y * (TILE_W + KERNEL_RADIUS * 2);<br>
+      <br>
+      <font color="#000000">....</font>// case1: left<br>
+      <font color="#000000">....</font>x = x0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift] = d_Data[ gLoc - KERNEL_RADIUS];</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>// case2: right<br>
+      <font color="#000000">....</font>x = x0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( x &gt; dataW-1 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x + shift] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + blockDim.x + shift] = d_Data[gLoc + KERNEL_RADIUS];<br>
+      <br>
+      <font color="#000000">....</font>__syncthreads();<br>
+      <br>
+      </code></font><font color="#CC6633"><code><font color="#000000">....</font>// convolution<br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>x = KERNEL_RADIUS + threadIdx.x;<br>
+      <font color="#000000">....</font>for (int i = -KERNEL_RADIUS; i &lt;= KERNEL_RADIUS; i++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>sum += data[x + i + shift] * d_Kernel[KERNEL_RADIUS + i];</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>d_Result[gLoc] = sum;<br>
+      <br>
+      </code></font><font color="#CC6633"><code>}<br>
+      <br>
+      </code></font><font color="#CC6633"><code>////////////////////////////////////////////////////////////////////////////////<br>
+      // Row convolution filter<br>
+      ////////////////////////////////////////////////////////////////////////////////<br>
+      __global__ void convolutionColGPU(<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Result,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>float *d_Data,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataW,<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>int dataH<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">..</font>)<br>
+      {<br>
+      <font color="#000000">....</font>// Data cache: threadIdx.x , threadIdx.y<br>
+      <font color="#000000">....</font>__shared__ float data[TILE_W * (TILE_H + KERNEL_RADIUS * 2)];<br>
+      <br>
+      <font color="#000000">....</font>// global mem address of this thread<br>
+      <font color="#000000">....</font>const int gLoc = threadIdx.x + <br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.x, blockDim.x) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(threadIdx.y, dataW) +<br>
+      <font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font><font color="#000000">....</font>IMUL(blockIdx.y, blockDim.y) * dataW;<br>
+      <br>
+      <font color="#000000">....</font>int y;		// image based coordinate</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>// original image based coordinate<br>
+      <font color="#000000">....</font>const int y0 = threadIdx.y + IMUL(blockIdx.y, blockDim.y);<br>
+      <font color="#000000">....</font>const int shift = threadIdx.y * (TILE_W);<br>
+      <br>
+      <font color="#000000">....</font>// case1: upper<br>
+      <font color="#000000">....</font>y = y0 - KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>if ( y &lt; 0 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift] = d_Data[ gLoc - IMUL(dataW, KERNEL_RADIUS)];</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>// case2: lower<br>
+      <font color="#000000">....</font>y = y0 + KERNEL_RADIUS;<br>
+      <font color="#000000">....</font>const int shift1 = shift + IMUL(blockDim.y, TILE_W);<br>
+      <font color="#000000">....</font>if ( y &gt; dataH-1 )<br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift1] = 0;<br>
+      <font color="#000000">....</font>else <br>
+      <font color="#000000">....</font><font color="#000000">....</font>data[threadIdx.x + shift1] = d_Data[gLoc + IMUL(dataW, KERNEL_RADIUS)];<br>
+      <br>
+      <font color="#000000">....</font>__syncthreads();</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>// convolution<br>
+      <font color="#000000">....</font>float sum = 0;<br>
+      <font color="#000000">....</font>for (int i = 0; i &lt;= KERNEL_RADIUS*2; i++)<br>
+      <font color="#000000">....</font><font color="#000000">....</font>sum += data[threadIdx.x + (threadIdx.y + i) * TILE_W] * d_Kernel[i];</code></font><br>
+      <br>
+      <font color="#CC6633"><code><font color="#000000">....</font>d_Result[gLoc] = sum;</code></font><br>
+      <br>
+      <font color="#CC6633"><code>}</code></font></p>
+  </blockquote>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>7. Step 4: nvidia convolution app</h3>
+<blockquote>
+  <p>In step 3, we made many of optimizations and improved performance greately. Now, there is a bit of further possible optimization to maximize memory bandwidth by change block organization as we see in nvidia's convolution document. Instead of changing code from step 3, I modified nvidia's original code to use image data to see the difference in performance. As I explained in the very beginning, there are two version of convolution app from nvidia. Following table shows those two application performance (modiifed version).</p>
+  <table width="689" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="278" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="118" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="126" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">convolutionTexture (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">21.25</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">75.45</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">301.12</font></div></td>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">convolutionSeparable (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">14.16</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">58.36</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">227.51</font></div></td>
+    </tr>
+  </tbody></table>
+  <p>Compared to the result from step 3, convolutionSeparable optimization shows <font color="#FF0000">x2 speed-up</font> (in resolution 2048). This application's kernel code is the same as the original one from nvidia. Only applicaiton side code is modified.</p>
+  <p>Below table shows a couple of experiments I ran at the beginning of top-down approach with this code (original nvidia convolutionSeparable app).</p>
+  <table width="689" border="2" bordercolor="#999999">
+    <tbody><tr>
+      <th width="278" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Resolution</font></div></th>
+      <th width="118" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">1024</font></div></th>
+      <th width="126" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">2048</font></div></th>
+      <th width="137" scope="col"><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">4096</font></div></th>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">Base case (no change) (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">14.16</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">58.36</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">227.51</font></div></td>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">/wo loopunroll (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">14.16</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">58.36</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">227.51</font></div></td>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">/wo __mul24 (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">23.35</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">78.36</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">302.81</font></div></td>
+    </tr>
+    <tr>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">/wo loopunroll &amp; __mul24 (msec)</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">24.36</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">77.96</font></div></td>
+      <td><div align="center"><font face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif">300.11</font></div></td>
+    </tr>
+  </tbody></table>
+  <p>As we can see here, loop unrolling does not impact on performance that much but __mul24 intruction gives <font color="#FF0000">x1.3 speed-up</font>.</p>
+  <p>Here is a brief performance chart from step 1 to step 4 (step 0 is excludes due to its huge number).</p>
+  <p><b><font size="4" face="Trebuchet MS, Geneva, Arial, Helvetica, SunSans-Regular, sans-serif"><img src="./CUDA Convolution_files/final_chart0.png" width="1000" height="697"></font></b></p>
+</blockquote>
+<h3>8. Application</h3>
+<blockquote>
+  <p>Here are three different version of convolution application. The first one is my own implemetation until step 3 and the other two applicaitons are the one I modified to use texture image instead of random data from nvidia application (see details in section 2 &amp; 7).</p>
+  <p>Image Data: <a href="https://www.evl.uic.edu/sjames/cs525/apps/hubble.tar.gz">hubble.tar.gz</a> (34MB. only include 1kby1k, 2kby2k, 4kby4k raw image from Andy's ditribution)</p>
+  <blockquote>
+    <p>Need to copy these image file in directory name of hubble at the same level of each convolution application directory. (if you copied application in xxx/convolution directory, then image directory must be xxx/hubble )</p>
+  </blockquote>
+  <h5>Download application source &amp; executable: </h5>
+  <blockquote>
+    <p> <a href="https://www.evl.uic.edu/sjames/cs525/apps/convolution.tar.gz">convolution.tar.gz</a> (version of step 3)</p>
+    <p><a href="https://www.evl.uic.edu/sjames/cs525/apps/convolutionTexture.tar.gz">convolutionTexture.tar.gz</a> (version of step 4, texture)</p>
+    <p><a href="https://www.evl.uic.edu/sjames/cs525/apps/convolutionSeparable.tar.gz">convolutionSeparable.tar.gz</a> (version of step 4, separable)</p>
+  </blockquote>
+  <h5>Execution </h5>
+  <blockquote>
+    <p>inside bin/darwin/release</p>
+    <p>./convolution [-i=image resolution] [-n=number of total run]</p>
+    <p>./convolutionTexture [-i=image resolution] [-n=number of total run]</p>
+    <p>./convolutionSeparable [-i=image resolution] [-n=number of total run]</p>
+    <p>default image resolution is 1024 and total run is 10 times.</p>
+  </blockquote>
+  <h5>Compile</h5>
+  <blockquote>
+    <p>in each application directory, type 'make'</p>
+  </blockquote>
+  <p>&nbsp;</p>
+</blockquote>
+<h3>9. References</h3>
+<blockquote>
+  <p>[1] Nvidia CUDA Programming Guide 2.0, <a href="http://www.nvidia.com/object/cuda_develop.html">http://www.nvidia.com/object/cuda_develop.html</a> </p>
+  <p>[2] Victor Podlozhnyuk, Image Convolution with CUDA, <em>nvidia CUDA 2.0 SDK convolutionSpeparable document</em></p>
+</blockquote>
+
+
+</body></html>

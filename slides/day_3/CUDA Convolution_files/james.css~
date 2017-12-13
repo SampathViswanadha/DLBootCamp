@@ -1,0 +1,156 @@
+@charset "UTF-8";
+
+/*
+<LINK href="css/james.css" rel="stylesheet" type="text/css">
+*/
+
+/* main body */
+body, td, th {
+	background-color: #000000;
+	color: #FFFFFF;
+	font-family: 'Century Gothic', 'Century Gothic', sans-serif;
+}
+
+/* hyper link */
+a:link { color: #FFFF99 }
+a:visited { color: #d7b30e }
+
+/* headers */
+H1 {
+	text-align:center;
+}
+H1.left {
+	text-align:left;
+}
+H1.large {
+	font-size:50px;
+}
+H2.center {
+	text-align:center;
+}
+H4 {
+	text-align:left;
+	text-indent:0px;
+	direction:ltr;
+	font-size:12pt;
+	text-decoration:underline;
+}
+H4.center {
+	text-align:center;
+}
+H4.plain {
+	text-decoration:none;
+}
+
+H5 {
+	text-align:left;
+	text-indent:0px;
+	direction:ltr;
+	line-height:16px;
+	margin-bottom:5px;
+	font-size:11pt;
+}
+H5.center {
+	text-align:center;
+}
+H5.tight {
+	line-height:0px;
+	margin-bottom:0px;
+}
+
+/* paragraph */
+P {
+	text-align:left;
+	text-indent:0px;
+	font-size:10pt;
+	font-weight:normal;
+	direction:ltr
+}
+P.center {
+	text-align:center;
+}
+P.desc {
+	margin-top:5px;
+}
+P.code {
+	color:#FF6633;
+	font-family="Courier New, Courier, monospace";
+	font-size:10pt;
+}
+code {
+	color:#FF6633;
+	font-size:10pt;
+}
+SPAN {
+	font-size:18pt;
+	font-style:normal;
+	font-weight:bold
+}
+TABLE {
+	border-width:thin;
+	border-collapse:collapse;
+	padding:3px;
+	text-align:center;
+	vertical-align:top;
+	direction:ltr;
+	width:auto;
+	height:auto;
+	display:table;
+	float:none
+}
+TR {
+	vertical-align:top;
+	height:auto
+}
+TH {
+	text-align:left;
+	vertical-align:top
+}
+TD {
+	text-align:left;
+	vertical-align:bottom
+}
+TD.top {
+	vertical-align:top
+}
+TD.center {
+	vertical-align:center
+}
+
+DIV[class="Sect"] {
+	text-align:left;
+	text-indent:0px;
+	direction:ltr
+}
+UL {
+	list-style-type:disc;
+	text-align:left;
+	text-indent:0px;
+	direction:ltr
+}
+LI {
+	list-style-type:disc;
+	text-align:left;
+	text-indent:0px;
+	direction:ltr;
+	line-height:24px
+}
+UL LI UL LI{
+	font-size:11pt;
+}
+DT {
+	text-align:left;
+	text-indent:-23px;
+	direction:ltr
+}
+DD {
+	text-align:left;
+	text-indent:-23px;
+	direction:ltr
+}
+
+descpara {
+	font-size:9.9pt;
+	font-weight:normal;
+	margin-top:5px;
+}
